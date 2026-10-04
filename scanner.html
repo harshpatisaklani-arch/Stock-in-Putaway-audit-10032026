@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" onerror="var s=document.createElement('script');s.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';document.head.appendChild(s)"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#000;color:#fff;font:16px/1.4 system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
+  #top{padding:14px 16px;font-weight:600;background:#14213D}
+  #reader{flex:1;min-height:0;overflow:hidden}
+  #bottom{padding:12px;background:#000}
+  #msg{color:#ffd54f;font-size:14px;margin-bottom:8px}
+  button{width:100%;font:inherit;font-weight:600;padding:14px;border:0;border-radius:8px;background:#fff;color:#14213D;margin-top:8px}
+  #result{display:none;padding:20px;text-align:center}
+  #result .code{font:600 24px monospace;word-break:break-all;background:#fff;color:#14213D;padding:14px;border-radius:8px;margin:12px 0}
+</style>
+</head>
+<body>
+  <div id="top">Point the camera at the code</div>
+  <div id="reader"></div>
+  <div id="bottom">
+    <div id="msg"></div>
+    <button id="cancel">Cancel</button>
+  </div>
+  <div id="result">
+    <div>Scanned</div>
+    <div class="code" id="code"></div>
+    <div id="note"></div>
+    <button id="copy">Copy</button>
+    <button id="close">Close this page</button>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const kind = new URLSearchParams(location.search).get('kind') === 'qr' ? 'qr' : 'barcode';
+$('top').textContent = kind === 'qr' ? 'Point the camera at the bin QR code' : 'Point the camera at the product barcode';
+
+let scanner = null, finished = false;
+
+function finish(text){
+  if (finished) return; finished = true;
+  const stop = scanner ? scanner.stop().catch(() => {}) : Promise.resolve();
+  stop.then(() => {
+    let sent = false;
+    try {
+      if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'scan', text: text }, '*'); sent = true; }
+    } catch (e) {}
+    if (sent) { setTimeout(() => window.close(), 300); }
+    // Fallback if the app could not be reached: show the text so it can be copied
+    setTimeout(() => {
+      $('reader').style.display = 'none'; $('bottom').style.display = 'none'; $('top').style.display = 'none';
+      $('code').textContent = text;
+      $('note').textContent = sent ? 'Sent to the app. You can close this page.' : 'Could not send to the app automatically. Copy this and paste it in the app.';
+      $('result').style.display = 'block';
+    }, 900);
+  });
+}
+
+function start(){
+  if (typeof Html5Qrcode === 'undefined') { $('msg').textContent = 'Scanner could not load. Check internet and reload.'; return; }
+  const F = Html5QrcodeSupportedFormats;
+  const formats = kind === 'qr' ? [F.QR_CODE, F.CODE_128, F.CODE_39]
+                                : [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.ITF];
+  scanner = new Html5Qrcode('reader', { formatsToSupport: formats, useBarCodeDetectorIfSupported: true, verbose: false });
+  const box = kind === 'qr'
+    ? (w, h) => { const s = Math.max(60, Math.floor(Math.min(w, h) * 0.7)); return { width: s, height: s }; }
+    : (w, h) => ({ width: Math.max(60, Math.floor(w * 0.85)), height: Math.max(60, Math.floor(h * 0.35)) });
+  const cfg = { fps: 10, qrbox: box };
+  const ok = txt => finish(String(txt).trim());
+  scanner.start({ facingMode: 'environment' }, cfg, ok, () => {})
+    .catch(e1 => Html5Qrcode.getCameras().then(cams => {
+      if (!cams || !cams.length) throw e1;
+      const back = cams.find(c => /back|rear|environment/i.test(c.label)) || cams[cams.length - 1];
+      return scanner.start(back.id, cfg, ok, () => {});
+    }))
+    .catch(e => {
+      const raw = String((e && (e.name || e.message)) || e);
+      let hint = 'Camera could not start.';
+      if (/NotAllowed|Permission|denied/i.test(raw)) hint = 'Camera permission is blocked. Tap the lock icon next to the web address, open Permissions, set Camera to Allow, then reload.';
+      else if (/NotFound|No cameras/i.test(raw)) hint = 'No camera found on this device.';
+      else if (/NotReadable|TrackStart/i.test(raw)) hint = 'Camera is being used by another app. Close it and reload.';
+      $('msg').textContent = hint + ' (' + raw.slice(0, 80) + ')';
+    });
+}
+
+$('cancel').onclick = () => { if (scanner) scanner.stop().catch(() => {}); window.close(); };
+$('copy').onclick = () => { navigator.clipboard && navigator.clipboard.writeText($('code').textContent); $('copy').textContent = 'Copied'; };
+$('close').onclick = () => window.close();
+window.addEventListener('load', start);
+</script>
+</body>
+</html>
